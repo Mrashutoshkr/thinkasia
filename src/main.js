@@ -196,6 +196,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const screenHeight = window.innerHeight;
         ctx.clearRect(0, 0, screenWidth, screenHeight);
         
+        // Soft glowing ocean base sphere to make the globe shape clearly visible
+        const oceanGrad = ctx.createRadialGradient(
+            globeCenter.x, globeCenter.y, globeRadius * 0.35,
+            globeCenter.x, globeCenter.y, globeRadius
+        );
+        oceanGrad.addColorStop(0, "rgba(20, 55, 110, 0.08)"); // Soft vibrant water blue
+        oceanGrad.addColorStop(0.8, "rgba(11, 37, 69, 0.045)"); // Deeper navy border
+        oceanGrad.addColorStop(1, "rgba(11, 37, 69, 0)"); // Fade out completely at sphere edge
+        
+        ctx.fillStyle = oceanGrad;
+        ctx.beginPath();
+        ctx.arc(globeCenter.x, globeCenter.y, globeRadius, 0, 2 * Math.PI);
+        ctx.fill();
+        
         // Smooth interpolation to target rotation
         rotationY += (targetRotationY - rotationY) * 0.08;
         rotationX += (targetRotationX - rotationX) * 0.08;
@@ -300,41 +314,42 @@ document.addEventListener('DOMContentLoaded', () => {
             const origParticle = particles[p.index];
             const depthFactor = (p.z + 1) / 2; // [0, 1]
             
-            // 1. Particle Dot Scale Reduction (visibly smaller, ultra-fine, razor-sharp)
-            let baseSize = 0.35;
-            let scaleMultiplier = 0.95;
+            // 1. Particle Sizing (increased slightly for visibility, keeping them sharp and clear)
+            let baseSize = 0.45;
+            let scaleMultiplier = 1.15;
             
             if (origParticle.region === "india") {
-                baseSize = 0.65;
-                scaleMultiplier = 1.7;
+                baseSize = 0.75;
+                scaleMultiplier = 2.0;
             } else if (origParticle.region === "asia") {
-                baseSize = 0.5;
-                scaleMultiplier = 1.35;
+                baseSize = 0.6;
+                scaleMultiplier = 1.6;
             } else if (origParticle.region === "other-land") {
-                baseSize = 0.4;
-                scaleMultiplier = 1.05;
+                baseSize = 0.5;
+                scaleMultiplier = 1.25;
             } else { // ocean
-                baseSize = 0.18;
-                scaleMultiplier = 0.45;
+                baseSize = 0.32;
+                scaleMultiplier = 0.78;
             }
             
             const size = baseSize + depthFactor * scaleMultiplier;
             
-            let baseAlpha = 0.08;
-            let depthSpan = 0.7;
+            // Increased alphas (opacity) for high visibility of continents and water
+            let baseAlpha = 0.15;
+            let depthSpan = 0.65;
             
             if (origParticle.region === "india") {
-                baseAlpha = 0.3;
-                depthSpan = 0.7;
+                baseAlpha = 0.45;
+                depthSpan = 0.55;
             } else if (origParticle.region === "asia") {
-                baseAlpha = 0.2;
-                depthSpan = 0.7;
+                baseAlpha = 0.35;
+                depthSpan = 0.55;
             } else if (origParticle.region === "other-land") {
-                baseAlpha = 0.12;
-                depthSpan = 0.6;
-            } else { // ocean
-                baseAlpha = 0.02;
-                depthSpan = 0.2;
+                baseAlpha = 0.22;
+                depthSpan = 0.58;
+            } else { // ocean (water)
+                baseAlpha = 0.12; // increased significantly to show water clearly
+                depthSpan = 0.38;
             }
             
             const alpha = baseAlpha + depthFactor * depthSpan;
@@ -347,10 +362,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Asia mapped to bright contrasting corporate crimson
                 color = `rgba(225, 29, 72, ${alpha})`;
             } else if (origParticle.region === "other-land") {
-                // Other landmasses rendered in light grey/white to match the image
-                color = `rgba(230, 235, 245, ${alpha * 0.85})`;
+                // Other landmasses rendered in light grey/white
+                color = `rgba(230, 235, 245, ${alpha})`;
             } else {
-                // Ocean isolated and colored exactly deep navy: rgb(11, 37, 69)
+                // Ocean isolated and colored exactly deep navy: rgb(11, 37, 69) with clear water visibility
                 color = `rgba(11, 37, 69, ${alpha})`;
             }
             
