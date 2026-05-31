@@ -47,14 +47,56 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3D Particles Definition
     const particles = [];
-    const particleCount = 550;
+    const particleCount = 950; // High density for ultra-fidelity continent outlines
     
     function isLand(x, y, z) {
-        // Spherical noise approximation for continent outlines
-        const n = Math.sin(x * 2.8) * Math.sin(y * 2.8) * Math.cos(z * 2.8) +
-                  Math.sin(x * 1.2 + 0.8) * Math.cos(y * 1.5) * Math.sin(z * 1.5) +
-                  Math.cos(x * 4.5) * Math.sin(y * 4.5) * Math.cos(z * 4.5) * 0.25;
-        return n > -0.05; // threshold
+        // Spherical longitude and latitude conversion
+        const lon = Math.atan2(x, z);
+        const lat = Math.asin(y);
+        
+        let isBaseLand = false;
+        
+        // Real-world continental bounding coordinates on the sphere
+        // 1. Eurasia (Europe + Asia)
+        if (lat > -0.15 && lat < 1.3 && lon > -0.35 && lon < 2.9) {
+            isBaseLand = true;
+        }
+        // 2. Africa
+        else if (lat > -0.62 && lat < 0.62 && lon > -0.35 && lon < 0.9) {
+            const maxWidth = 0.9 - (lat < 0 ? lat * -1.2 : 0);
+            if (lon < maxWidth) {
+                isBaseLand = true;
+            }
+        }
+        // 3. Australia
+        else if (lat > -0.7 && lat < -0.18 && lon > 1.8 && lon < 2.7) {
+            isBaseLand = true;
+        }
+        // 4. North America
+        else if (lat > 0.12 && lat < 1.3 && (lon < -0.95 || lon > 3.0)) {
+            isBaseLand = true;
+        }
+        // 5. South America
+        else if (lat > -0.9 && lat < 0.22 && lon > -1.45 && lon < -0.6) {
+            const maxWidth = -0.6 - (lat < 0 ? lat * -0.8 : 0);
+            if (lon > -1.45 && lon < maxWidth) {
+                isBaseLand = true;
+            }
+        }
+        // 6. Greenland
+        else if (lat > 0.95 && lon > -1.2 && lon < -0.2) {
+            isBaseLand = true;
+        }
+        // 7. Antarctica
+        else if (lat < -1.1) {
+            isBaseLand = true;
+        }
+        
+        // Add organic noise for realistic coastlines and islands
+        const noise = Math.sin(x * 12) * Math.cos(y * 12) * Math.sin(z * 12) * 0.15 +
+                      Math.cos(x * 24) * Math.sin(y * 24) * 0.08;
+                      
+        return isBaseLand ? (noise > -0.12) : (noise > 0.18);
     }
 
     function getRegion(x, y, z) {
@@ -62,13 +104,16 @@ document.addEventListener('DOMContentLoaded', () => {
             return "ocean";
         }
         
-        // Specific coordinate bounding box representing India peninsula on local grid
-        if (x >= 0.2 && x <= 0.45 && y >= -0.38 && y <= -0.08 && z >= 0.35 && z <= 0.8) {
+        const lon = Math.atan2(x, z);
+        const lat = Math.asin(y);
+        
+        // India (accurate boundaries)
+        if (lat > 0.1 && lat < 0.52 && lon > 1.15 && lon < 1.6) {
             return "india";
         }
         
-        // Standard coordinate bounding box representing Asia continent on local grid
-        if (x >= -0.15 && x <= 0.95 && y >= -0.65 && y <= 0.6 && z >= -0.55 && z <= 0.9) {
+        // Asia (accurate boundaries)
+        if (lat > -0.15 && lat < 1.15 && lon > 0.85 && lon < 2.75) {
             return "asia";
         }
         
@@ -392,13 +437,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- DRAW CITIES & CURVED RED ARCS (Matching the visual mockup image) ---
         const cities = [
-            { name: "Delhi", x: 0.28, y: -0.22, z: 0.58, align: "left" },
-            { name: "Mumbai", x: 0.22, y: -0.32, z: 0.52, align: "right" },
-            { name: "Bengaluru", x: 0.24, y: -0.38, z: 0.48, align: "right" },
-            { name: "Chennai", x: 0.29, y: -0.36, z: 0.49, align: "left" },
-            { name: "Kolkata", x: 0.36, y: -0.23, z: 0.55, align: "left" },
-            { name: "Chnnalari", x: 0.55, y: -0.38, z: 0.38, align: "left" }
+            { name: "Delhi", lat: 0.50, lon: 1.35, align: "left" }, // 28.6° N, 77.2° E
+            { name: "Mumbai", lat: 0.33, lon: 1.27, align: "right" }, // 19.0° N, 72.8° E
+            { name: "Bengaluru", lat: 0.23, lon: 1.35, align: "right" }, // 13.0° N, 77.6° E
+            { name: "Chennai", lat: 0.23, lon: 1.40, align: "left" }, // 13.0° N, 80.2° E
+            { name: "Kolkata", lat: 0.39, lon: 1.54, align: "left" }, // 22.6° N, 88.3° E
+            { name: "Chnnalari", lat: 0.02, lon: 1.81, align: "left" } // Singapore area: 1.3° N, 103.8° E
         ];
+        
+        cities.forEach(city => {
+            city.x = Math.cos(city.lon) * Math.cos(city.lat);
+            city.y = Math.sin(city.lat);
+            city.z = Math.sin(city.lon) * Math.cos(city.lat);
+        });
+
+        const extraDestinations = [
+            { name: "Beijing", lat: 0.70, lon: 2.03 }, // Beijing
+            { name: "Tokyo", lat: 0.62, lon: 2.44 }, // Tokyo
+            { name: "Jakarta", lat: -0.10, lon: 1.86 }, // Jakarta
+            { name: "Manila", lat: 0.25, lon: 2.11 }  // Manila
+        ];
+        extraDestinations.forEach(dest => {
+            dest.x = Math.cos(dest.lon) * Math.cos(dest.lat);
+            dest.y = Math.sin(dest.lat);
+            dest.z = Math.sin(dest.lon) * Math.cos(dest.lat);
+        });
 
         const arcs = [
             { from: "Delhi", to: "Chnnalari" },
@@ -406,11 +469,11 @@ document.addEventListener('DOMContentLoaded', () => {
             { from: "Bengaluru", to: "Chnnalari" },
             { from: "Chennai", to: "Chnnalari" },
             { from: "Kolkata", to: "Chnnalari" },
-            { from: "Delhi", to: { x: 0.60, y: -0.10, z: 0.45 } },
-            { from: "Mumbai", to: { x: 0.62, y: -0.05, z: 0.42 } },
-            { from: "Kolkata", to: { x: 0.64, y: -0.12, z: 0.40 } },
-            { from: "Chennai", to: { x: 0.52, y: -0.48, z: 0.33 } },
-            { from: "Bengaluru", to: { x: 0.50, y: -0.52, z: 0.30 } }
+            { from: "Delhi", to: extraDestinations[0] }, // Beijing
+            { from: "Mumbai", to: extraDestinations[1] }, // Tokyo
+            { from: "Kolkata", to: extraDestinations[0] }, // Beijing
+            { from: "Chennai", to: extraDestinations[2] }, // Jakarta
+            { from: "Bengaluru", to: extraDestinations[3] } // Manila
         ];
 
         // Draw curved arcs
