@@ -18,12 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const ctx = canvas.getContext("2d");
 
     // State
-    let useFallback = false;
-    let fallbackInitialized = false;
-    const frameCount = 192;
-    const images = [];
-    let loadedCount = 0;
-    
     // Responsive Sphere Coordinates
     let globeCenter = { x: window.innerWidth * 0.5, y: window.innerHeight * 0.5 };
     let globeRadius = Math.min(window.innerWidth, window.innerHeight) * 0.35;
@@ -47,81 +41,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // 3D Particles Definition
     const particles = [];
-    const particleCount = 950; // High density for ultra-fidelity continent outlines
-    
-    function isLand(x, y, z) {
-        // Spherical longitude and latitude conversion
-        const lon = Math.atan2(x, z);
-        const lat = Math.asin(y);
+    const particleCount = 3500; // High density for ultra-fidelity continent outlines
+    const connections = [];
+
+    // Precompute Connections to optimize rendering loop (eliminate O(N^2) distance checks)
+    function precomputeConnections() {
+        connections.length = 0;
+        const maxDistance = 0.08;
+        const maxDistanceSq = maxDistance * maxDistance;
         
-        let isBaseLand = false;
-        
-        // Real-world continental bounding coordinates on the sphere
-        // 1. Eurasia (Europe + Asia)
-        if (lat > -0.15 && lat < 1.3 && lon > -0.35 && lon < 2.9) {
-            isBaseLand = true;
-        }
-        // 2. Africa
-        else if (lat > -0.62 && lat < 0.62 && lon > -0.35 && lon < 0.9) {
-            const maxWidth = 0.9 - (lat < 0 ? lat * -1.2 : 0);
-            if (lon < maxWidth) {
-                isBaseLand = true;
+        for (let i = 0; i < particles.length; i++) {
+            const p1 = particles[i];
+            if (p1.region === "ocean") continue;
+            
+            for (let j = i + 1; j < particles.length; j++) {
+                const p2 = particles[j];
+                if (p2.region === "ocean") continue;
+                
+                const dx = p1.x - p2.x;
+                const dy = p1.y - p2.y;
+                const dz = p1.z - p2.z;
+                const distSq = dx*dx + dy*dy + dz*dz;
+                
+                if (distSq < maxDistanceSq) {
+                    connections.push({
+                        i,
+                        j,
+                        distSq,
+                        isIndiaConn: p1.region === "india" && p2.region === "india",
+                        isAsiaConn: p1.region === "asia" && p2.region === "asia"
+                    });
+                }
             }
         }
-        // 3. Australia
-        else if (lat > -0.7 && lat < -0.18 && lon > 1.8 && lon < 2.7) {
-            isBaseLand = true;
-        }
-        // 4. North America
-        else if (lat > 0.12 && lat < 1.3 && (lon < -0.95 || lon > 3.0)) {
-            isBaseLand = true;
-        }
-        // 5. South America
-        else if (lat > -0.9 && lat < 0.22 && lon > -1.45 && lon < -0.6) {
-            const maxWidth = -0.6 - (lat < 0 ? lat * -0.8 : 0);
-            if (lon > -1.45 && lon < maxWidth) {
-                isBaseLand = true;
-            }
-        }
-        // 6. Greenland
-        else if (lat > 0.95 && lon > -1.2 && lon < -0.2) {
-            isBaseLand = true;
-        }
-        // 7. Antarctica
-        else if (lat < -1.1) {
-            isBaseLand = true;
-        }
-        
-        // Add organic noise for realistic coastlines and islands
-        const noise = Math.sin(x * 12) * Math.cos(y * 12) * Math.sin(z * 12) * 0.15 +
-                      Math.cos(x * 24) * Math.sin(y * 24) * 0.08;
-                      
-        return isBaseLand ? (noise > -0.12) : (noise > 0.18);
     }
 
-    function getRegion(x, y, z) {
-        if (!isLand(x, y, z)) {
-            return "ocean";
-        }
-        
-        const lon = Math.atan2(x, z);
-        const lat = Math.asin(y);
-        
-        // India (accurate boundaries)
-        if (lat > 0.1 && lat < 0.52 && lon > 1.15 && lon < 1.6) {
-            return "india";
-        }
-        
-        // Asia (accurate boundaries)
-        if (lat > -0.15 && lat < 1.15 && lon > 0.85 && lon < 2.75) {
-            return "asia";
-        }
-        
-        return "other-land";
-    }
-
-    // Distribute points on sphere using Fibonacci spiral (golden ratio)
-    function initFallbackGlobe() {
+    // Mathematical Fallback Globe (runs immediately before texture loads)
+    function initGlobeFallback() {
         particles.length = 0;
         const goldenRatio = (1 + Math.sqrt(5)) / 2;
         
@@ -134,94 +90,102 @@ document.addEventListener('DOMContentLoaded', () => {
             const y = Math.sin(theta) * Math.sin(phi);
             const z = Math.cos(phi);
             
-            const region = getRegion(x, y, z);
+            const lon = Math.atan2(z, x);
+            const lat = Math.asin(y);
+            
+            let isBaseLand = false;
+            // Crude bounding boxes for immediate rendering
+            if (lat > -0.15 && lat < 1.3 && lon > -0.35 && lon < 2.9) isBaseLand = true;
+            else if (lat > -0.62 && lat < 0.62 && lon > -0.35 && lon < 0.9) isBaseLand = true;
+            else if (lat > -0.7 && lat < -0.18 && lon > 1.8 && lon < 2.7) isBaseLand = true;
+            else if (lat > 0.12 && lat < 1.3 && (lon < -0.95 || lon > 3.0)) isBaseLand = true;
+            else if (lat > -0.9 && lat < 0.22 && lon > -1.45 && lon < -0.6) isBaseLand = true;
+            
+            let region = "ocean";
+            if (isBaseLand) {
+                if (lat > 0.12 && lat < 0.63 && lon > 1.18 && lon < 1.69) {
+                    region = "india";
+                } else if (lat > -0.17 && lat < 1.31 && lon > 0.45 && lon < 2.97) {
+                    region = "asia";
+                } else {
+                    region = "other-land";
+                }
+            }
+            
             particles.push({ x, y, z, region });
         }
-        fallbackInitialized = true;
+        precomputeConnections();
     }
 
-    // Preloading Engine for Image Sequence
-    const currentFrame = (index) => {
-        const frameNumber = String(index).padStart(3, '0');
-        return `/images/sequence/ezgif-frame-${frameNumber}.jpg`;
-    };
+    // High-Fidelity Geographically Accurate Globe initialization
+    let mapData = null;
+    let mapWidth = 0;
+    let mapHeight = 0;
 
-    // Load first image as a quick check
-    const firstImg = new Image();
-    firstImg.onload = () => {
-        // If the first image succeeds, start preloading the rest
-        images.push(firstImg);
-        preloadRemainingImages();
-    };
-    firstImg.onerror = () => {
-        // If first image fails, fall back to procedural globe
-        useFallback = true;
-        initFallbackGlobe();
-        requestAnimationFrame(renderFallbackGlobe);
-    };
-    firstImg.src = currentFrame(1);
+    function initGlobeWithTextureData(data, width, height) {
+        mapData = data;
+        mapWidth = width;
+        mapHeight = height;
 
-    // If first image takes too long to load (e.g. 404 block), trigger fallback
-    const fallbackTimeout = setTimeout(() => {
-        if (!useFallback && loadedCount === 0) {
-            useFallback = true;
-            initFallbackGlobe();
-            requestAnimationFrame(renderFallbackGlobe);
-        }
-    }, 400);
-
-    function preloadRemainingImages() {
-        clearTimeout(fallbackTimeout);
-        for (let i = 2; i <= frameCount; i++) {
-            const img = new Image();
-            img.onload = () => {
-                loadedCount++;
-            };
-            img.onerror = () => {
-                // Fall back if we hit load issues
-                useFallback = true;
-                if (!fallbackInitialized) {
-                    initFallbackGlobe();
-                    requestAnimationFrame(renderFallbackGlobe);
-                }
-            };
-            img.src = currentFrame(i);
-            images.push(img);
-        }
-        // Render first frame immediately
-        renderImageFrame(0);
-    }
-
-    // High-DPI Responsive Contain Render Loop (Image Sequence)
-    function renderImageFrame(index) {
-        if (useFallback) return;
-        const activeImage = images[index] || firstImg;
-        if (!activeImage || !activeImage.complete) return;
-
-        const dpr = window.devicePixelRatio || 1;
-        canvas.width = window.innerWidth * dpr;
-        canvas.height = window.innerHeight * dpr;
-        ctx.scale(dpr, dpr);
-
-        const imgWidth = activeImage.width;
-        const imgHeight = activeImage.height;
-        const screenWidth = window.innerWidth;
-        const screenHeight = window.innerHeight;
-
-        const ratio = Math.min(screenWidth / imgWidth, screenHeight / imgHeight);
-        const newWidth = imgWidth * ratio;
-        const newHeight = imgHeight * ratio;
+        particles.length = 0;
+        const goldenRatio = (1 + Math.sqrt(5)) / 2;
         
-        // Positional adjustment to match layout (desktop right-aligned, mobile centered)
-        let xOffset = (screenWidth - newWidth) / 2;
-        if (screenWidth >= 1024) {
-            xOffset = screenWidth * 0.72 - newWidth / 2;
+        for (let i = 0; i < particleCount; i++) {
+            const theta = 2 * Math.PI * i / goldenRatio;
+            const phi = Math.acos(1 - 2 * (i + 0.5) / particleCount);
+            
+            const x = Math.cos(theta) * Math.sin(phi);
+            const y = Math.sin(theta) * Math.sin(phi);
+            const z = Math.cos(phi);
+            
+            const lon = Math.atan2(z, x);
+            const lat = Math.asin(y);
+            
+            // Map longitude/latitude to image coordinates
+            const px = Math.floor(((lon + Math.PI) / (2 * Math.PI)) * mapWidth);
+            const py = Math.floor(((Math.PI / 2 - lat) / Math.PI) * mapHeight);
+            
+            // Sample image pixel (Red channel)
+            const idx = (py * mapWidth + px) * 4;
+            const isLandVal = mapData[idx] > 128;
+            
+            let region = "ocean";
+            if (isLandVal) {
+                // India bounds
+                if (lat > 0.12 && lat < 0.63 && lon > 1.18 && lon < 1.69) {
+                    region = "india";
+                }
+                // Asia bounds
+                else if (lat > -0.17 && lat < 1.31 && lon > 0.45 && lon < 2.97) {
+                    region = "asia";
+                } else {
+                    region = "other-land";
+                }
+            }
+            
+            particles.push({ x, y, z, region });
         }
-        const yOffset = (screenHeight - newHeight) / 2;
-
-        ctx.clearRect(0, 0, screenWidth, screenHeight);
-        ctx.drawImage(activeImage, xOffset, yOffset, newWidth, newHeight);
+        precomputeConnections();
     }
+
+    // Load world map texture image
+    const mapImg = new Image();
+    mapImg.src = "/world-map-texture.png";
+    mapImg.onload = () => {
+        const offscreen = document.createElement("canvas");
+        offscreen.width = 360;
+        offscreen.height = 180;
+        const oCtx = offscreen.getContext("2d");
+        oCtx.drawImage(mapImg, 0, 0, 360, 180);
+        const imgData = oCtx.getImageData(0, 0, 360, 180);
+        initGlobeWithTextureData(imgData.data, 360, 180);
+    };
+    mapImg.onerror = () => {
+        console.warn("Failed to load world map texture, using mathematical fallback");
+    };
+
+    // Initialize immediate fallback globe so canvas is never empty
+    initGlobeFallback();
 
     // Procedural 3D Particle Globe Render Engine
     let rotationY = 0;
@@ -229,9 +193,48 @@ document.addEventListener('DOMContentLoaded', () => {
     let targetRotationY = 0;
     let targetRotationX = 0.2;
     
-    function renderFallbackGlobe() {
-        if (!useFallback) return;
-        
+    // Define cities with 3D coordinates pre-calculated
+    const cities = [
+        { name: "Delhi", lat: 0.50, lon: 1.35, align: "left" },
+        { name: "Mumbai", lat: 0.33, lon: 1.27, align: "right" },
+        { name: "Bengaluru", lat: 0.23, lon: 1.35, align: "right" },
+        { name: "Chennai", lat: 0.23, lon: 1.40, align: "left" },
+        { name: "Kolkata", lat: 0.39, lon: 1.54, align: "left" },
+        { name: "Chnnalari", lat: 0.02, lon: 1.81, align: "left" }
+    ];
+    
+    cities.forEach(city => {
+        city.x = Math.cos(city.lon) * Math.cos(city.lat);
+        city.y = Math.sin(city.lat);
+        city.z = Math.sin(city.lon) * Math.cos(city.lat);
+    });
+
+    const extraDestinations = [
+        { name: "Beijing", lat: 0.70, lon: 2.03 },
+        { name: "Tokyo", lat: 0.62, lon: 2.44 },
+        { name: "Jakarta", lat: -0.10, lon: 1.86 },
+        { name: "Manila", lat: 0.25, lon: 2.11 }
+    ];
+    extraDestinations.forEach(dest => {
+        dest.x = Math.cos(dest.lon) * Math.cos(dest.lat);
+        dest.y = Math.sin(dest.lat);
+        dest.z = Math.sin(dest.lon) * Math.cos(dest.lat);
+    });
+
+    const arcs = [
+        { from: "Delhi", to: "Chnnalari" },
+        { from: "Mumbai", to: "Chnnalari" },
+        { from: "Bengaluru", to: "Chnnalari" },
+        { from: "Chennai", to: "Chnnalari" },
+        { from: "Kolkata", to: "Chnnalari" },
+        { from: "Delhi", to: extraDestinations[0] }, // Beijing
+        { from: "Mumbai", to: extraDestinations[1] }, // Tokyo
+        { from: "Kolkata", to: extraDestinations[0] }, // Beijing
+        { from: "Chennai", to: extraDestinations[2] }, // Jakarta
+        { from: "Bengaluru", to: extraDestinations[3] } // Manila
+    ];
+
+    function renderGlobe() {
         const dpr = window.devicePixelRatio || 1;
         canvas.width = window.innerWidth * dpr;
         canvas.height = window.innerHeight * dpr;
@@ -241,279 +244,250 @@ document.addEventListener('DOMContentLoaded', () => {
         const screenHeight = window.innerHeight;
         ctx.clearRect(0, 0, screenWidth, screenHeight);
         
-        // Soft glowing ocean base sphere to make the globe shape clearly visible
-        const oceanGrad = ctx.createRadialGradient(
-            globeCenter.x, globeCenter.y, globeRadius * 0.35,
+        // 1. Draw Solid Ocean Base Sphere representing water body
+        const sphereGrad = ctx.createRadialGradient(
+            globeCenter.x - globeRadius * 0.15, globeCenter.y - globeRadius * 0.15, globeRadius * 0.1,
             globeCenter.x, globeCenter.y, globeRadius
         );
-        oceanGrad.addColorStop(0, "rgba(20, 55, 110, 0.08)"); // Soft vibrant water blue
-        oceanGrad.addColorStop(0.8, "rgba(11, 37, 69, 0.045)"); // Deeper navy border
-        oceanGrad.addColorStop(1, "rgba(11, 37, 69, 0)"); // Fade out completely at sphere edge
+        sphereGrad.addColorStop(0, "rgb(15, 45, 80)"); // Brightened center highlight for 3D look
+        sphereGrad.addColorStop(0.5, "rgb(11, 37, 69)"); // Standard deep navy
+        sphereGrad.addColorStop(0.9, "rgb(7, 24, 46)"); // Dark shaded border
+        sphereGrad.addColorStop(1.0, "rgba(5, 17, 32, 0.95)"); // Very sharp dark edge
         
-        ctx.fillStyle = oceanGrad;
+        ctx.fillStyle = sphereGrad;
         ctx.beginPath();
         ctx.arc(globeCenter.x, globeCenter.y, globeRadius, 0, 2 * Math.PI);
+        ctx.fill();
+
+        // Subtle outer atmosphere glow
+        const glowGrad = ctx.createRadialGradient(
+            globeCenter.x, globeCenter.y, globeRadius * 0.95,
+            globeCenter.x, globeCenter.y, globeRadius * 1.05
+        );
+        glowGrad.addColorStop(0, "rgba(11, 37, 69, 0.4)");
+        glowGrad.addColorStop(0.5, "rgba(20, 55, 110, 0.15)");
+        glowGrad.addColorStop(1.0, "rgba(20, 55, 110, 0)");
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath();
+        ctx.arc(globeCenter.x, globeCenter.y, globeRadius * 1.05, 0, 2 * Math.PI);
         ctx.fill();
         
         // Smooth interpolation to target rotation
         rotationY += (targetRotationY - rotationY) * 0.08;
         rotationX += (targetRotationX - rotationX) * 0.08;
         
-        // Idle rotation when not scrolling
-        targetRotationY += 0.0025;
+        // Continuous rotation
+        targetRotationY += 0.0018;
         
         const cosY = Math.cos(rotationY);
         const sinY = Math.sin(rotationY);
         const cosX = Math.cos(rotationX);
         const sinX = Math.sin(rotationX);
         
-        // Project points and store screen coordinates
+        // Project all points
         const projected = [];
+        const visibleParticles = [];
+        const cameraDistance = 2.4;
         
         for (let i = 0; i < particles.length; i++) {
             const p = particles[i];
             
-            // Rotate around Y axis
+            // Rotate Y
             let x1 = p.x * cosY - p.z * sinY;
             let z1 = p.x * sinY + p.z * cosY;
             
-            // Rotate around X axis
+            // Rotate X
             let y2 = p.y * cosX - z1 * sinX;
             let z2 = p.y * sinX + z1 * cosX;
             
-            // Perspective projection
-            const cameraDistance = 2.5;
+            // Project
             const perspective = 1 / (cameraDistance - z2);
-            
             const screenX = globeCenter.x + x1 * globeRadius * perspective;
             const screenY = globeCenter.y + y2 * globeRadius * perspective;
             
-            projected.push({
-                x: screenX,
-                y: screenY,
-                z: z2, // keep depth for occlusion/shading
-                index: i
-            });
-        }
-        
-        // Draw connections (mesh wireframe)
-        ctx.lineWidth = 0.4;
-        const maxDistanceSq = 0.15; // 3D distance threshold squared
-        
-        for (let i = 0; i < particles.length; i++) {
-            const p1 = particles[i];
-            const proj1 = projected[i];
+            projected.push({ x: screenX, y: screenY, z: z2 });
             
-            // Don't draw connections for back-facing particles to reduce clutter
-            if (proj1.z < -0.25) continue;
-            
-            // Find neighbors
-            for (let j = i + 1; j < particles.length; j++) {
-                const p2 = particles[j];
-                const proj2 = projected[j];
-                if (proj2.z < -0.25) continue;
-                
-                const p1Region = p1.region;
-                const p2Region = p2.region;
-                
-                // Only connect if at least one is a land particle to avoid ocean line clutter
-                if (p1Region === "ocean" && p2Region === "ocean") continue;
-                
-                const dx = p1.x - p2.x;
-                const dy = p1.y - p2.y;
-                const dz = p1.z - p2.z;
-                const distSq = dx*dx + dy*dy + dz*dz;
-                
-                if (distSq < maxDistanceSq) {
-                    const isIndiaConn = p1Region === "india" && p2Region === "india";
-                    const isAsiaConn = p1Region === "asia" && p2Region === "asia";
-                    
-                    let baseAlpha = 0.08;
-                    if (isIndiaConn) baseAlpha = 0.35;
-                    else if (isAsiaConn) baseAlpha = 0.2;
-                    else if (p1Region === "other-land" && p2Region === "other-land") baseAlpha = 0.12;
-                    
-                    const alpha = (1 - (distSq / maxDistanceSq)) * baseAlpha * (proj1.z + 1.25) * (proj2.z + 1.25);
-                    
-                    if (isIndiaConn) {
-                        ctx.strokeStyle = `rgba(245, 158, 11, ${alpha * 0.3})`; // Amber Gold connection
-                    } else if (isAsiaConn) {
-                        ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.22})`; // Crimson Rose connection
-                    } else {
-                        ctx.strokeStyle = `rgba(11, 37, 69, ${alpha * 0.14})`; // Deep Navy connection
-                    }
-                    
-                    ctx.beginPath();
-                    ctx.moveTo(proj1.x, proj1.y);
-                    ctx.lineTo(proj2.x, proj2.y);
-                    ctx.stroke();
-                }
+            // Filter visible ones (front hemisphere)
+            if (z2 >= -0.15) {
+                visibleParticles.push({
+                    x: screenX,
+                    y: screenY,
+                    z: z2,
+                    index: i
+                });
             }
         }
         
-        // Draw points (sorted by depth Z for correct paint overlap)
-        const sorted = [...projected].sort((a, b) => a.z - b.z);
+        // Draw mesh wireframe for land connections
+        for (let c = 0; c < connections.length; c++) {
+            const conn = connections[c];
+            const proj1 = projected[conn.i];
+            const proj2 = projected[conn.j];
+            
+            if (proj1.z >= -0.15 && proj2.z >= -0.15) {
+                let baseAlpha = 0.06;
+                if (conn.isIndiaConn) baseAlpha = 0.35;
+                else if (conn.isAsiaConn) baseAlpha = 0.16;
+                
+                const depthFactor = (proj1.z + proj2.z + 0.3) / 2.3; // depth-based opacity
+                const alpha = Math.max(0, baseAlpha * depthFactor);
+                
+                if (conn.isIndiaConn) {
+                    ctx.strokeStyle = `rgba(245, 158, 11, ${alpha})`;
+                } else if (conn.isAsiaConn) {
+                    ctx.strokeStyle = `rgba(225, 29, 72, ${alpha})`;
+                } else {
+                    ctx.strokeStyle = `rgba(230, 235, 245, ${alpha})`;
+                }
+                
+                ctx.lineWidth = conn.isIndiaConn ? 0.65 : 0.4;
+                ctx.beginPath();
+                ctx.moveTo(proj1.x, proj1.y);
+                ctx.lineTo(proj2.x, proj2.y);
+                ctx.stroke();
+            }
+        }
         
-        for (let i = 0; i < sorted.length; i++) {
-            const p = sorted[i];
-            const origParticle = particles[p.index];
-            const depthFactor = (p.z + 1) / 2; // [0, 1]
+        // Sort visible particles by Z depth (from back to front) so overlap is correct
+        visibleParticles.sort((a, b) => a.z - b.z);
+        
+        // Draw particles
+        for (let i = 0; i < visibleParticles.length; i++) {
+            const vp = visibleParticles[i];
+            const orig = particles[vp.index];
+            const depthFactor = (vp.z + 0.15) / 1.15; // normalize [0, 1] for visible range
             
-            // 1. Particle Sizing (increased slightly for visibility, keeping them sharp and clear)
+            // Ultra-fine, razor-sharp dot sizes
             let baseSize = 0.45;
-            let scaleMultiplier = 1.15;
+            let scaleMultiplier = 0.65;
             
-            if (origParticle.region === "india") {
-                baseSize = 0.75;
-                scaleMultiplier = 2.0;
-            } else if (origParticle.region === "asia") {
-                baseSize = 0.6;
-                scaleMultiplier = 1.6;
-            } else if (origParticle.region === "other-land") {
-                baseSize = 0.5;
-                scaleMultiplier = 1.25;
+            if (orig.region === "india") {
+                baseSize = 0.7;
+                scaleMultiplier = 1.0;
+            } else if (orig.region === "asia") {
+                baseSize = 0.55;
+                scaleMultiplier = 0.8;
+            } else if (orig.region === "other-land") {
+                baseSize = 0.45;
+                scaleMultiplier = 0.7;
             } else { // ocean
                 baseSize = 0.32;
-                scaleMultiplier = 0.78;
+                scaleMultiplier = 0.45;
             }
             
             const size = baseSize + depthFactor * scaleMultiplier;
             
-            // Increased alphas (opacity) for high visibility of continents and water
-            let baseAlpha = 0.15;
+            // Opacity
+            let baseAlpha = 0.2;
             let depthSpan = 0.65;
             
-            if (origParticle.region === "india") {
+            if (orig.region === "india") {
+                baseAlpha = 0.65;
+                depthSpan = 0.35;
+            } else if (orig.region === "asia") {
                 baseAlpha = 0.45;
-                depthSpan = 0.55;
-            } else if (origParticle.region === "asia") {
-                baseAlpha = 0.35;
-                depthSpan = 0.55;
-            } else if (origParticle.region === "other-land") {
-                baseAlpha = 0.22;
-                depthSpan = 0.58;
-            } else { // ocean (water)
-                baseAlpha = 0.12; // increased significantly to show water clearly
-                depthSpan = 0.38;
+                depthSpan = 0.5;
+            } else if (orig.region === "other-land") {
+                baseAlpha = 0.3;
+                depthSpan = 0.6;
+            } else { // ocean
+                baseAlpha = 0.12;
+                depthSpan = 0.22;
             }
             
             const alpha = baseAlpha + depthFactor * depthSpan;
             
             let color;
-            if (origParticle.region === "india") {
-                // India isolated with premium Gold accent shade
+            if (orig.region === "india") {
                 color = `rgba(245, 158, 11, ${alpha})`;
-            } else if (origParticle.region === "asia") {
-                // Asia mapped to bright contrasting corporate crimson
+            } else if (orig.region === "asia") {
                 color = `rgba(225, 29, 72, ${alpha})`;
-            } else if (origParticle.region === "other-land") {
-                // Other landmasses rendered in light grey/white
-                color = `rgba(230, 235, 245, ${alpha})`;
+            } else if (orig.region === "other-land") {
+                color = `rgba(240, 244, 255, ${alpha})`;
             } else {
-                // Ocean isolated and colored exactly deep navy: rgb(11, 37, 69) with clear water visibility
-                color = `rgba(11, 37, 69, ${alpha})`;
+                color = `rgba(74, 157, 255, ${alpha * 0.75})`; // Glowing blue ocean dots
             }
             
             ctx.fillStyle = color;
             ctx.beginPath();
-            ctx.arc(p.x, p.y, size, 0, 2 * Math.PI);
+            ctx.arc(vp.x, vp.y, size, 0, 2 * Math.PI);
             ctx.fill();
             
-            // Add subtle glow to larger front points for India and Asia
-            if (depthFactor > 0.8) {
-                if (origParticle.region === "india") {
-                    ctx.fillStyle = `rgba(251, 191, 36, ${alpha * 0.35})`;
+            // Subtle glow for front-most India/Asia points
+            if (depthFactor > 0.82) {
+                if (orig.region === "india") {
+                    ctx.fillStyle = `rgba(251, 191, 36, ${alpha * 0.38})`;
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, size * 2.2, 0, 2 * Math.PI);
+                    ctx.arc(vp.x, vp.y, size * 2.2, 0, 2 * Math.PI);
                     ctx.fill();
-                } else if (origParticle.region === "asia") {
-                    ctx.fillStyle = `rgba(225, 29, 72, ${alpha * 0.25})`;
+                } else if (orig.region === "asia") {
+                    ctx.fillStyle = `rgba(225, 29, 72, ${alpha * 0.28})`;
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, size * 2.2, 0, 2 * Math.PI);
+                    ctx.arc(vp.x, vp.y, size * 2.2, 0, 2 * Math.PI);
                     ctx.fill();
                 }
             }
         }
-
-        // --- DRAW CITIES & CURVED RED ARCS (Matching the visual mockup image) ---
-        const cities = [
-            { name: "Delhi", lat: 0.50, lon: 1.35, align: "left" }, // 28.6° N, 77.2° E
-            { name: "Mumbai", lat: 0.33, lon: 1.27, align: "right" }, // 19.0° N, 72.8° E
-            { name: "Bengaluru", lat: 0.23, lon: 1.35, align: "right" }, // 13.0° N, 77.6° E
-            { name: "Chennai", lat: 0.23, lon: 1.40, align: "left" }, // 13.0° N, 80.2° E
-            { name: "Kolkata", lat: 0.39, lon: 1.54, align: "left" }, // 22.6° N, 88.3° E
-            { name: "Chnnalari", lat: 0.02, lon: 1.81, align: "left" } // Singapore area: 1.3° N, 103.8° E
-        ];
         
+        // --- DRAW CITIES & CURVED RED ARCS ---
+        // Project cities
+        const projCities = [];
         cities.forEach(city => {
-            city.x = Math.cos(city.lon) * Math.cos(city.lat);
-            city.y = Math.sin(city.lat);
-            city.z = Math.sin(city.lon) * Math.cos(city.lat);
+            const cx1 = city.x * cosY - city.z * sinY;
+            const cz1 = city.x * sinY + city.z * cosY;
+            const cy2 = city.y * cosX - cz1 * sinX;
+            const cz2 = city.y * sinX + cz1 * cosX;
+            
+            projCities.push({
+                name: city.name,
+                x: globeCenter.x + cx1 * globeRadius * (1 / (cameraDistance - cz2)),
+                y: globeCenter.y + cy2 * globeRadius * (1 / (cameraDistance - cz2)),
+                z: cz2,
+                align: city.align
+            });
         });
-
-        const extraDestinations = [
-            { name: "Beijing", lat: 0.70, lon: 2.03 }, // Beijing
-            { name: "Tokyo", lat: 0.62, lon: 2.44 }, // Tokyo
-            { name: "Jakarta", lat: -0.10, lon: 1.86 }, // Jakarta
-            { name: "Manila", lat: 0.25, lon: 2.11 }  // Manila
-        ];
+        
+        const projDestinations = [];
         extraDestinations.forEach(dest => {
-            dest.x = Math.cos(dest.lon) * Math.cos(dest.lat);
-            dest.y = Math.sin(dest.lat);
-            dest.z = Math.sin(dest.lon) * Math.cos(dest.lat);
+            const cx1 = dest.x * cosY - dest.z * sinY;
+            const cz1 = dest.x * sinY + dest.z * cosY;
+            const cy2 = dest.y * cosX - cz1 * sinX;
+            const cz2 = dest.y * sinX + cz1 * cosX;
+            
+            projDestinations.push({
+                name: dest.name,
+                x: globeCenter.x + cx1 * globeRadius * (1 / (cameraDistance - cz2)),
+                y: globeCenter.y + cy2 * globeRadius * (1 / (cameraDistance - cz2)),
+                z: cz2
+            });
         });
-
-        const arcs = [
-            { from: "Delhi", to: "Chnnalari" },
-            { from: "Mumbai", to: "Chnnalari" },
-            { from: "Bengaluru", to: "Chnnalari" },
-            { from: "Chennai", to: "Chnnalari" },
-            { from: "Kolkata", to: "Chnnalari" },
-            { from: "Delhi", to: extraDestinations[0] }, // Beijing
-            { from: "Mumbai", to: extraDestinations[1] }, // Tokyo
-            { from: "Kolkata", to: extraDestinations[0] }, // Beijing
-            { from: "Chennai", to: extraDestinations[2] }, // Jakarta
-            { from: "Bengaluru", to: extraDestinations[3] } // Manila
-        ];
-
+        
         // Draw curved arcs
         arcs.forEach(arc => {
-            const fromCity = cities.find(c => c.name === arc.from);
+            const fromCity = projCities.find(c => c.name === arc.from);
             if (!fromCity) return;
             
-            let toCoord = typeof arc.to === "string" ? cities.find(c => c.name === arc.to) : arc.to;
-            if (!toCoord) return;
+            let toCity = typeof arc.to === "string" ? projCities.find(c => c.name === arc.to) : null;
+            if (!toCity && typeof arc.to !== "string") {
+                toCity = projDestinations.find(d => d.name === arc.to.name);
+            }
+            if (!toCity) return;
             
-            // Rotate from
-            const fx1 = fromCity.x * cosY - fromCity.z * sinY;
-            const fz1 = fromCity.x * sinY + fromCity.z * cosY;
-            const fy2 = fromCity.y * cosX - fz1 * sinX;
-            const fz2 = fromCity.y * sinX + fz1 * cosX;
-            
-            // Rotate to
-            const tx1 = toCoord.x * cosY - toCoord.z * sinY;
-            const tz1 = toCoord.x * sinY + toCoord.z * cosY;
-            const ty2 = toCoord.y * cosX - tz1 * sinX;
-            const tz2 = toCoord.y * sinX + tz1 * cosX;
-            
-            if (fz2 > -0.1 && tz2 > -0.1) {
-                const fp = 1 / (2.5 - fz2);
-                const tp = 1 / (2.5 - tz2);
+            // Only draw arc if both cities are on the visible side of the globe
+            if (fromCity.z > -0.15 && toCity.z > -0.15) {
+                // Find 3D control point pulled outward for height
+                const fromRaw = cities.find(c => c.name === arc.from);
+                const toRaw = typeof arc.to === "string" ? cities.find(c => c.name === arc.to) : arc.to;
                 
-                const fsx = globeCenter.x + fx1 * globeRadius * fp;
-                const fsy = globeCenter.y + fy2 * globeRadius * fp;
-                const tsx = globeCenter.x + tx1 * globeRadius * tp;
-                const tsy = globeCenter.y + ty2 * globeRadius * tp;
-                
-                // 3D control point pulled outward for height
-                const mx = (fromCity.x + toCoord.x) / 2;
-                const my = (fromCity.y + toCoord.y) / 2;
-                const mz = (fromCity.z + toCoord.z) / 2;
+                const mx = (fromRaw.x + toRaw.x) / 2;
+                const my = (fromRaw.y + toRaw.y) / 2;
+                const mz = (fromRaw.z + toRaw.z) / 2;
                 
                 const len = Math.sqrt(mx*mx + my*my + mz*mz);
-                const hx = (mx / len) * 1.35;
-                const hy = (my / len) * 1.35;
-                const hz = (mz / len) * 1.35;
+                // height of the curve
+                const hx = (mx / len) * 1.32;
+                const hy = (my / len) * 1.32;
+                const hz = (mz / len) * 1.32;
                 
                 // Rotate control point
                 const cx1 = hx * cosY - hz * sinY;
@@ -521,54 +495,45 @@ document.addEventListener('DOMContentLoaded', () => {
                 const cy2 = hy * cosX - cz1 * sinX;
                 const cz2 = hy * sinX + cz1 * cosX;
                 
-                const cp = 1 / (2.5 - cz2);
+                const cp = 1 / (cameraDistance - cz2);
                 const csx = globeCenter.x + cx1 * globeRadius * cp;
                 const csy = globeCenter.y + cy2 * globeRadius * cp;
                 
-                const alpha = 0.22 * ((fz2 + tz2) / 2 + 1.25);
+                const alpha = 0.22 * ((fromCity.z + toCity.z) / 2 + 1.15) * 0.8;
                 
-                // Faint outer glow line
-                ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.28})`;
-                ctx.lineWidth = 3.0;
+                // Draw glow line
+                ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.25})`;
+                ctx.lineWidth = 2.8;
                 ctx.beginPath();
-                ctx.moveTo(fsx, fsy);
-                ctx.quadraticCurveTo(csx, csy, tsx, tsy);
+                ctx.moveTo(fromCity.x, fromCity.y);
+                ctx.quadraticCurveTo(csx, csy, toCity.x, toCity.y);
                 ctx.stroke();
                 
-                // Bright core line
+                // Draw bright core line
                 ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.95})`;
-                ctx.lineWidth = 1.0;
+                ctx.lineWidth = 0.95;
                 ctx.beginPath();
-                ctx.moveTo(fsx, fsy);
-                ctx.quadraticCurveTo(csx, csy, tsx, tsy);
+                ctx.moveTo(fromCity.x, fromCity.y);
+                ctx.quadraticCurveTo(csx, csy, toCity.x, toCity.y);
                 ctx.stroke();
             }
         });
-
+        
         // Draw city dots and labels
-        cities.forEach(city => {
-            const cx1 = city.x * cosY - city.z * sinY;
-            const cz1 = city.x * sinY + city.z * cosY;
-            const cy2 = city.y * cosX - cz1 * sinX;
-            const cz2 = city.y * sinX + cz1 * cosX;
-            
-            if (cz2 > 0) {
-                const perspective = 1 / (2.5 - cz2);
-                const sx = globeCenter.x + cx1 * globeRadius * perspective;
-                const sy = globeCenter.y + cy2 * globeRadius * perspective;
-                
+        projCities.forEach(city => {
+            if (city.z > 0) {
                 // City circle
                 ctx.fillStyle = "#ffffff";
                 ctx.strokeStyle = "rgba(122, 28, 40, 0.85)";
                 ctx.lineWidth = 1.5;
                 ctx.beginPath();
-                ctx.arc(sx, sy, 3, 0, 2 * Math.PI);
+                ctx.arc(city.x, city.y, 3, 0, 2 * Math.PI);
                 ctx.fill();
                 ctx.stroke();
                 
                 // Text label
                 ctx.fillStyle = "#0B2545"; // Deep trust navy
-                ctx.font = "bold 9px sans-serif";
+                ctx.font = "bold 9.5px sans-serif";
                 ctx.textAlign = city.align === "left" ? "left" : "right";
                 ctx.textBaseline = "middle";
                 
@@ -576,13 +541,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.strokeStyle = "#ffffff";
                 ctx.lineWidth = 3.5;
                 const offset = city.align === "left" ? 6 : -6;
-                ctx.strokeText(city.name, sx + offset, sy);
-                ctx.fillText(city.name, sx + offset, sy);
+                ctx.strokeText(city.name, city.x + offset, city.y);
+                ctx.fillText(city.name, city.x + offset, city.y);
             }
         });
         
-        requestAnimationFrame(renderFallbackGlobe);
+        requestAnimationFrame(renderGlobe);
     }
+    
+    // Start Render Loop
+    requestAnimationFrame(renderGlobe);
 
     // 4. Scroll Tracking
     window.addEventListener("scroll", () => {
@@ -590,34 +558,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
         const scrollFraction = maxScroll > 0 ? scrollTop / maxScroll : 0;
 
-        if (useFallback) {
-            // Map scroll directly to rotation
-            targetRotationY = scrollFraction * Math.PI * 4;
-            targetRotationX = 0.2 + scrollFraction * 0.4;
-        } else {
-            const frameIndex = Math.min(
-                frameCount - 1,
-                Math.floor(scrollFraction * frameCount)
-            );
-            requestAnimationFrame(() => renderImageFrame(frameIndex));
-        }
+        // Map scroll directly to target Y/X rotation
+        targetRotationY = scrollFraction * Math.PI * 4;
+        targetRotationX = 0.2 + scrollFraction * 0.4;
     });
 
     // Handle Resize
     window.addEventListener("resize", () => {
         updateGlobeDimensions();
-        if (useFallback) {
-            // Recalculates dynamically in render loop
-        } else {
-            const scrollTop = window.scrollY;
-            const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-            const scrollFraction = maxScroll > 0 ? scrollTop / maxScroll : 0;
-            const frameIndex = Math.min(
-                frameCount - 1,
-                Math.floor(scrollFraction * frameCount)
-            );
-            renderImageFrame(frameIndex);
-        }
     });
 
     // --- AOS INITIALIZATION ---
