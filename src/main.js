@@ -301,21 +301,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const depthFactor = (p.z + 1) / 2; // [0, 1]
             
             // 1. Particle Dot Scale Reduction (visibly smaller, ultra-fine, razor-sharp)
-            let baseSize = 0.4;
-            let scaleMultiplier = 1.0;
+            let baseSize = 0.35;
+            let scaleMultiplier = 0.95;
             
             if (origParticle.region === "india") {
-                baseSize = 0.7;
-                scaleMultiplier = 1.8;
+                baseSize = 0.65;
+                scaleMultiplier = 1.7;
             } else if (origParticle.region === "asia") {
-                baseSize = 0.55;
-                scaleMultiplier = 1.4;
+                baseSize = 0.5;
+                scaleMultiplier = 1.35;
             } else if (origParticle.region === "other-land") {
-                baseSize = 0.45;
-                scaleMultiplier = 1.1;
+                baseSize = 0.4;
+                scaleMultiplier = 1.05;
             } else { // ocean
-                baseSize = 0.2;
-                scaleMultiplier = 0.5;
+                baseSize = 0.18;
+                scaleMultiplier = 0.45;
             }
             
             const size = baseSize + depthFactor * scaleMultiplier;
@@ -347,10 +347,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Asia mapped to bright contrasting corporate crimson
                 color = `rgba(225, 29, 72, ${alpha})`;
             } else if (origParticle.region === "other-land") {
-                // Other landmasses rendered in soft rose-slate
-                color = `rgba(180, 100, 110, ${alpha * 0.75})`;
+                // Other landmasses rendered in light grey/white to match the image
+                color = `rgba(230, 235, 245, ${alpha * 0.85})`;
             } else {
-                // Ocean isolated and colored exactly deep navy rgb(11, 37, 69)
+                // Ocean isolated and colored exactly deep navy: rgb(11, 37, 69)
                 color = `rgba(11, 37, 69, ${alpha})`;
             }
             
@@ -374,6 +374,134 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         }
+
+        // --- DRAW CITIES & CURVED RED ARCS (Matching the visual mockup image) ---
+        const cities = [
+            { name: "Delhi", x: 0.28, y: -0.22, z: 0.58, align: "left" },
+            { name: "Mumbai", x: 0.22, y: -0.32, z: 0.52, align: "right" },
+            { name: "Bengaluru", x: 0.24, y: -0.38, z: 0.48, align: "right" },
+            { name: "Chennai", x: 0.29, y: -0.36, z: 0.49, align: "left" },
+            { name: "Kolkata", x: 0.36, y: -0.23, z: 0.55, align: "left" },
+            { name: "Chnnalari", x: 0.55, y: -0.38, z: 0.38, align: "left" }
+        ];
+
+        const arcs = [
+            { from: "Delhi", to: "Chnnalari" },
+            { from: "Mumbai", to: "Chnnalari" },
+            { from: "Bengaluru", to: "Chnnalari" },
+            { from: "Chennai", to: "Chnnalari" },
+            { from: "Kolkata", to: "Chnnalari" },
+            { from: "Delhi", to: { x: 0.60, y: -0.10, z: 0.45 } },
+            { from: "Mumbai", to: { x: 0.62, y: -0.05, z: 0.42 } },
+            { from: "Kolkata", to: { x: 0.64, y: -0.12, z: 0.40 } },
+            { from: "Chennai", to: { x: 0.52, y: -0.48, z: 0.33 } },
+            { from: "Bengaluru", to: { x: 0.50, y: -0.52, z: 0.30 } }
+        ];
+
+        // Draw curved arcs
+        arcs.forEach(arc => {
+            const fromCity = cities.find(c => c.name === arc.from);
+            if (!fromCity) return;
+            
+            let toCoord = typeof arc.to === "string" ? cities.find(c => c.name === arc.to) : arc.to;
+            if (!toCoord) return;
+            
+            // Rotate from
+            const fx1 = fromCity.x * cosY - fromCity.z * sinY;
+            const fz1 = fromCity.x * sinY + fromCity.z * cosY;
+            const fy2 = fromCity.y * cosX - fz1 * sinX;
+            const fz2 = fromCity.y * sinX + fz1 * cosX;
+            
+            // Rotate to
+            const tx1 = toCoord.x * cosY - toCoord.z * sinY;
+            const tz1 = toCoord.x * sinY + toCoord.z * cosY;
+            const ty2 = toCoord.y * cosX - tz1 * sinX;
+            const tz2 = toCoord.y * sinX + tz1 * cosX;
+            
+            if (fz2 > -0.1 && tz2 > -0.1) {
+                const fp = 1 / (2.5 - fz2);
+                const tp = 1 / (2.5 - tz2);
+                
+                const fsx = globeCenter.x + fx1 * globeRadius * fp;
+                const fsy = globeCenter.y + fy2 * globeRadius * fp;
+                const tsx = globeCenter.x + tx1 * globeRadius * tp;
+                const tsy = globeCenter.y + ty2 * globeRadius * tp;
+                
+                // 3D control point pulled outward for height
+                const mx = (fromCity.x + toCoord.x) / 2;
+                const my = (fromCity.y + toCoord.y) / 2;
+                const mz = (fromCity.z + toCoord.z) / 2;
+                
+                const len = Math.sqrt(mx*mx + my*my + mz*mz);
+                const hx = (mx / len) * 1.35;
+                const hy = (my / len) * 1.35;
+                const hz = (mz / len) * 1.35;
+                
+                // Rotate control point
+                const cx1 = hx * cosY - hz * sinY;
+                const cz1 = hx * sinY + hz * cosY;
+                const cy2 = hy * cosX - cz1 * sinX;
+                const cz2 = hy * sinX + cz1 * cosX;
+                
+                const cp = 1 / (2.5 - cz2);
+                const csx = globeCenter.x + cx1 * globeRadius * cp;
+                const csy = globeCenter.y + cy2 * globeRadius * cp;
+                
+                const alpha = 0.22 * ((fz2 + tz2) / 2 + 1.25);
+                
+                // Faint outer glow line
+                ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.28})`;
+                ctx.lineWidth = 3.0;
+                ctx.beginPath();
+                ctx.moveTo(fsx, fsy);
+                ctx.quadraticCurveTo(csx, csy, tsx, tsy);
+                ctx.stroke();
+                
+                // Bright core line
+                ctx.strokeStyle = `rgba(225, 29, 72, ${alpha * 0.95})`;
+                ctx.lineWidth = 1.0;
+                ctx.beginPath();
+                ctx.moveTo(fsx, fsy);
+                ctx.quadraticCurveTo(csx, csy, tsx, tsy);
+                ctx.stroke();
+            }
+        });
+
+        // Draw city dots and labels
+        cities.forEach(city => {
+            const cx1 = city.x * cosY - city.z * sinY;
+            const cz1 = city.x * sinY + city.z * cosY;
+            const cy2 = city.y * cosX - cz1 * sinX;
+            const cz2 = city.y * sinX + cz1 * cosX;
+            
+            if (cz2 > 0) {
+                const perspective = 1 / (2.5 - cz2);
+                const sx = globeCenter.x + cx1 * globeRadius * perspective;
+                const sy = globeCenter.y + cy2 * globeRadius * perspective;
+                
+                // City circle
+                ctx.fillStyle = "#ffffff";
+                ctx.strokeStyle = "rgba(122, 28, 40, 0.85)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.arc(sx, sy, 3, 0, 2 * Math.PI);
+                ctx.fill();
+                ctx.stroke();
+                
+                // Text label
+                ctx.fillStyle = "#0B2545"; // Deep trust navy
+                ctx.font = "bold 9px sans-serif";
+                ctx.textAlign = city.align === "left" ? "left" : "right";
+                ctx.textBaseline = "middle";
+                
+                // Soft outline
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 3.5;
+                const offset = city.align === "left" ? 6 : -6;
+                ctx.strokeText(city.name, sx + offset, sy);
+                ctx.fillText(city.name, sx + offset, sy);
+            }
+        });
         
         requestAnimationFrame(renderFallbackGlobe);
     }
