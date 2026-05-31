@@ -193,14 +193,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let targetRotationY = 0;
     let targetRotationX = 0.2;
     
-    // Define cities with 3D coordinates pre-calculated
+    // Define cities with 3D coordinates pre-calculated and spaced out for clean separation
     const cities = [
-        { name: "Delhi", lat: 0.50, lon: 1.35, align: "left" },
-        { name: "Mumbai", lat: 0.33, lon: 1.27, align: "right" },
-        { name: "Bengaluru", lat: 0.23, lon: 1.35, align: "right" },
-        { name: "Chennai", lat: 0.23, lon: 1.40, align: "left" },
-        { name: "Kolkata", lat: 0.39, lon: 1.54, align: "left" },
-        { name: "Chnnalari", lat: 0.02, lon: 1.81, align: "left" }
+        { name: "Delhi", lat: 0.54, lon: 1.32, align: "left", ox: 6, oy: -8 },
+        { name: "Mumbai", lat: 0.31, lon: 1.21, align: "right", ox: -6, oy: -2 },
+        { name: "Bengaluru", lat: 0.17, lon: 1.33, align: "right", ox: -6, oy: 8 },
+        { name: "Chennai", lat: 0.17, lon: 1.44, align: "left", ox: 6, oy: 8 },
+        { name: "Kolkata", lat: 0.42, lon: 1.58, align: "left", ox: 6, oy: -6 },
+        { name: "Chnnalari", lat: -0.05, lon: 1.83, align: "left", ox: 6, oy: 0 } // Singapore area
     ];
     
     cities.forEach(city => {
@@ -244,33 +244,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const screenHeight = window.innerHeight;
         ctx.clearRect(0, 0, screenWidth, screenHeight);
         
-        // 1. Draw Solid Ocean Base Sphere representing water body
-        const sphereGrad = ctx.createRadialGradient(
-            globeCenter.x - globeRadius * 0.15, globeCenter.y - globeRadius * 0.15, globeRadius * 0.1,
-            globeCenter.x, globeCenter.y, globeRadius
-        );
-        sphereGrad.addColorStop(0, "rgb(15, 45, 80)"); // Brightened center highlight for 3D look
-        sphereGrad.addColorStop(0.5, "rgb(11, 37, 69)"); // Standard deep navy
-        sphereGrad.addColorStop(0.9, "rgb(7, 24, 46)"); // Dark shaded border
-        sphereGrad.addColorStop(1.0, "rgba(5, 17, 32, 0.95)"); // Very sharp dark edge
-        
-        ctx.fillStyle = sphereGrad;
-        ctx.beginPath();
-        ctx.arc(globeCenter.x, globeCenter.y, globeRadius, 0, 2 * Math.PI);
-        ctx.fill();
-
-        // Subtle outer atmosphere glow
-        const glowGrad = ctx.createRadialGradient(
-            globeCenter.x, globeCenter.y, globeRadius * 0.95,
-            globeCenter.x, globeCenter.y, globeRadius * 1.05
-        );
-        glowGrad.addColorStop(0, "rgba(11, 37, 69, 0.4)");
-        glowGrad.addColorStop(0.5, "rgba(20, 55, 110, 0.15)");
-        glowGrad.addColorStop(1.0, "rgba(20, 55, 110, 0)");
-        ctx.fillStyle = glowGrad;
-        ctx.beginPath();
-        ctx.arc(globeCenter.x, globeCenter.y, globeRadius * 1.05, 0, 2 * Math.PI);
-        ctx.fill();
+        // 1. Transparent Globe Background (solid background color removed as requested)
         
         // Smooth interpolation to target rotation
         rotationY += (targetRotationY - rotationY) * 0.08;
@@ -403,9 +377,11 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (orig.region === "asia") {
                 color = `rgba(225, 29, 72, ${alpha})`;
             } else if (orig.region === "other-land") {
-                color = `rgba(240, 244, 255, ${alpha})`;
+                // Dark slate-navy particles for other landmasses to contrast on the light website background
+                color = `rgba(11, 37, 69, ${alpha * 0.75})`;
             } else {
-                color = `rgba(74, 157, 255, ${alpha * 0.75})`; // Glowing blue ocean dots
+                // Soft teal-blue particles for oceans
+                color = `rgba(30, 110, 200, ${alpha * 0.35})`;
             }
             
             ctx.fillStyle = color;
@@ -443,7 +419,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 x: globeCenter.x + cx1 * globeRadius * (1 / (cameraDistance - cz2)),
                 y: globeCenter.y + cy2 * globeRadius * (1 / (cameraDistance - cz2)),
                 z: cz2,
-                align: city.align
+                align: city.align,
+                ox: city.ox,
+                oy: city.oy
             });
         });
         
@@ -519,7 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
         
-        // Draw city dots and labels
+        // Draw city dots and labels with fine-tuned offsets for clear separation
         projCities.forEach(city => {
             if (city.z > 0) {
                 // City circle
@@ -537,12 +515,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.textAlign = city.align === "left" ? "left" : "right";
                 ctx.textBaseline = "middle";
                 
-                // Soft outline
+                // Soft outline with individual offsets
                 ctx.strokeStyle = "#ffffff";
                 ctx.lineWidth = 3.5;
-                const offset = city.align === "left" ? 6 : -6;
-                ctx.strokeText(city.name, city.x + offset, city.y);
-                ctx.fillText(city.name, city.x + offset, city.y);
+                ctx.strokeText(city.name, city.x + city.ox, city.y + city.oy);
+                ctx.fillText(city.name, city.x + city.ox, city.y + city.oy);
             }
         });
         
